@@ -478,6 +478,12 @@
             "state" : "translated",
             "value" : "CGM Ayarları"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CGM 设置"
+          }
         }
       }
     },
