@@ -478,6 +478,12 @@
             "state" : "translated",
             "value" : "CGM Ayarları"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CGM 设置"
+          }
         }
       }
     },
@@ -518,6 +524,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fermer"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "סגור"
           }
         },
         "it" : {
@@ -891,6 +903,12 @@
             "value" : "Vælg Upload, hvis du bruger en anden kilde end en fjerntjeneste."
           }
         },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle die Option Hochladen, wenn Du eine andere Quelle als einen Remotedienst verwendest."
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
@@ -919,6 +937,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wybierz opcję Prześlij, jeśli korzystasz ze źródła innego niż usługa zdalna."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selectați opțiunea Încărcare dacă utilizați o altă sursă decât un serviciu la distanță."
           }
         },
         "ru" : {
@@ -965,6 +989,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Źródło Nightscout Remote CGM użyje danych CGM z Nightscout i udostępni je w pętli. Jest to przydatne, jeśli nie możesz dodać swojego urządzenia CGM do Loop, ale Twoje dane CGM są dostępne w Nightscout. \n\nNie zaleca się używania tego do terapii ze względu na ryzyko przerw w działaniu sieci i brak obsługi aplikacji w tle."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sursa CGM Nightscout Remote va utiliza datele CGM de la Nightscout și le va face disponibile în Loop. Acest lucru este util dacă nu puteți adăuga dispozitivul CGM la Loop, însă datele CGM sunt disponibile în Nightscout. \n \nNu se recomandă utilizarea acestei funcții pentru terapie din cauza riscului de întreruperi ale rețelei și a lipsei de suport pentru execuția aplicației în fundal."
           }
         },
         "ru" : {
@@ -1150,6 +1180,12 @@
             "value" : "Prześlij do usługi zdalnej"
           }
         },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Încărcați în serviciul de la distanță"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1198,6 +1234,12 @@
           }
         },
         "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URL"
+          }
+        },
+        "ro" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "URL"
@@ -1256,6 +1298,12 @@
             "value" : "Użyj filtra glukozy"
           }
         },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utilizați filtrul de glucoză"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1307,6 +1355,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Użyj filtra Kalmana, aby wygładzić szum sensora."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utilizați filtrul Kalman pentru a filtra zgomotul senzorului."
           }
         },
         "ru" : {
