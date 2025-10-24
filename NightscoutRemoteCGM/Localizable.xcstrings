@@ -129,6 +129,12 @@
             "state" : "translated",
             "value" : "API Secret"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API Secret"
+          }
         }
       }
     },
