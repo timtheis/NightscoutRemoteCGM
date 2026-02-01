@@ -638,6 +638,12 @@
             "state" : "translated",
             "value" : "Продолжить"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续"
+          }
         }
       }
     },
