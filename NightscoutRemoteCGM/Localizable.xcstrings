@@ -633,6 +633,12 @@
             "value" : "Kontynuuj"
           }
         },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continuați"
+          }
+        },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
@@ -785,6 +791,12 @@
             "value" : "Fertig"
           }
         },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminé"
+          }
+        },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
@@ -807,6 +819,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gotowe"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Realizat"
           }
         },
         "ru" : {
@@ -983,6 +1001,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The Nightscout Remote CGM source will use your CGM data from Nightscout and make it available in Loop. This is useful if you can't add your CGM device to Loop but your CGM data is available on Nightscout.\n\nIt is not recommended to use this for therapy due to the risk of network outages and the lack of app background support."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La source Nightscout Remote CGM utilisera les données CGM de Nightscout et les rendra disponibles dans Loop, ce qui est utile si vous ne pouvez pas ajouter votre appareil CGM à Loop mais que vos données CGM sont disponibles sur Nightscout.\n\nIl n'est pas recommandé d'utiliser cette source pour la thérapie en raison du risque de pannes de réseau et du manque de support de l'application en arrière-plan."
           }
         },
         "it" : {
@@ -1168,6 +1192,12 @@
             "value" : "Upload to remote service"
           }
         },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Téléverser sur le service distant"
+          }
+        },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1286,6 +1316,12 @@
             "value" : "Use glucose filter"
           }
         },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utiliser une filtre de glycémie"
+          }
+        },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1343,6 +1379,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Use Kalman filter to smooth out a sensor noise."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utiliser le filtre de Kalman pour atténuer le bruit d'un capteur."
           }
         },
         "it" : {
