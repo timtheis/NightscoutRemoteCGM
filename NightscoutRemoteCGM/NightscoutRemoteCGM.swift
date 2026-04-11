@@ -7,8 +7,9 @@
 //
 
 import Foundation
-import LoopKit
 import HealthKit
+import LoopKit
+import UserNotifications
 import Combine
 import NightscoutKit
 
