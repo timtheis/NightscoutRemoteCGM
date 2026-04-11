@@ -1,5 +1,5 @@
 //
-//  NightscoutAPIManager.swift
+//  NightscoutRemoteCGM.swift
 //  NightscoutRemoteCGM
 //
 //  Created by Ivan Valkou on 10.10.2019.
@@ -111,21 +111,22 @@ public class NightscoutRemoteCGM: CGMManager {
         }
 
         processQueue.async {
-	// FORCED LIBRE TOGGLE: Set to false to go back to Nightscout
+            // --- OUR INJECTED TOGGLE ---
             let useLibreDirect = true 
 
-	    if useLibreDirect {
+            if useLibreDirect {
                 self.isFetching = true
                 self.fetchLibreData { result in
                     self.isFetching = false
-                    // We must return to the main thread or delegate queue
+                    // UI/Main thread requirement for Loop completion
                     DispatchQueue.main.async {
                         completion(result)
                     }
                 }
                 return 
             }
-	// ------------------------------------------
+            // ---------------------------
+
             self.isFetching = true
 
             nightscoutClient.fetchRecent { fetchResult in
@@ -203,12 +204,8 @@ public class NightscoutRemoteCGM: CGMManager {
                         completion(.error(error))
                     }
                 }
-
-
             }
         }
-
-
     }
 
     public var device: HKDevice? = nil
@@ -244,21 +241,8 @@ public class NightscoutRemoteCGM: CGMManager {
         }
         updateTimer.resume()
     }
-}
 
-// MARK: - AlertResponder implementation
-extension NightscoutRemoteCGM {
-    public func acknowledgeAlert(alertIdentifier: Alert.AlertIdentifier, completion: @escaping (Error?) -> Void) {
-        completion(nil)
-    }
-}
-
-// MARK: - AlertSoundVendor implementation
-extension NightscoutRemoteCGM {
-    public func getSoundBaseURL() -> URL? { return nil }
-    public func getSounds() -> [Alert.Sound] { return [] }
-}
-// MARK: - Libre LinkUp Integration
+    // MARK: - Libre LinkUp Integration
     
     private let libreEmail = "timothy.theis@gmail.com"
     private let librePassword = "mmg5737TIM%!"
@@ -294,19 +278,17 @@ extension NightscoutRemoteCGM {
                 formatter.timeZone = TimeZone(identifier: "UTC")
                 let date = formatter.date(from: timestampString) ?? Date()
                 
-                let glucoseTrend: LoopKit.GlucoseTrend? = nil // We can map this later
-                
-		let sample = NewGlucoseSample(
-		    date: date,
-		    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value),
-		    condition: nil,
-		    trend: nil,
-		    trendRate: nil,
-		    isDisplayOnly: false,
-		    wasUserEntered: false,
-		    syncIdentifier: "\(Int(date.timeIntervalSince1970))",
-		    device: self.device
-		)
+                let sample = NewGlucoseSample(
+                    date: date,
+                    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value),
+                    condition: nil,
+                    trend: nil,
+                    trendRate: nil,
+                    isDisplayOnly: false,
+                    wasUserEntered: false,
+                    syncIdentifier: "\(Int(date.timeIntervalSince1970))",
+                    device: self.device
+                )
 
                 self.latestBackfill = GlucoseEntry(
                     glucose: value,
@@ -345,3 +327,17 @@ extension NightscoutRemoteCGM {
             completion(true)
         }.resume()
     }
+}
+
+// MARK: - AlertResponder implementation
+extension NightscoutRemoteCGM {
+    public func acknowledgeAlert(alertIdentifier: Alert.AlertIdentifier, completion: @escaping (Error?) -> Void) {
+        completion(nil)
+    }
+}
+
+// MARK: - AlertSoundVendor implementation
+extension NightscoutRemoteCGM {
+    public func getSoundBaseURL() -> URL? { return nil }
+    public func getSounds() -> [Alert.Sound] { return [] }
+}
