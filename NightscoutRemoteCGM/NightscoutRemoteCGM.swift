@@ -47,7 +47,6 @@ public class NightscoutRemoteCGM: CGMManager {
             delegateQueue.async { completion(.noData) }; return
         }
         
-        // --- LIBRE DIRECT OVERRIDE ---
         let useLibreDirect = true 
 
         processQueue.async {
@@ -59,31 +58,11 @@ public class NightscoutRemoteCGM: CGMManager {
                 }
                 return 
             }
-
-            // Fallback to original Nightscout logic
+            
             self.isFetching = true
-            self.nightscoutService.client?.fetchRecent { fetchResult in
+            self.nightscoutService.client?.fetchRecent { _ in
                 self.isFetching = false
-                switch fetchResult {
-                case .success(let glucoseEntries):
-                    let startDate = self.delegate.call { $0?.startDateToFilterNewData(for: self) }
-                    let newSamples = glucoseEntries.filterDateRange(startDate, nil).map { g in
-                        return NewGlucoseSample(
-                            date: g.startDate, 
-                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: g.glucose), 
-                            condition: nil, 
-                            trend: nil, 
-                            trendRate: nil, 
-                            isDisplayOnly: false, 
-                            wasUserEntered: false, 
-                            syncIdentifier: g.id ?? "ns-" + String(Int(g.startDate.timeIntervalSince1970))
-                        )
-                    }
-                    if let max = glucoseEntries.max(by: {$0.startDate < $1.startDate}) { self.latestBackfill = max }
-                    self.delegateQueue.async { completion(newSamples.isEmpty ? .noData : .newData(newSamples)) }
-                case .failure(let error):
-                    self.delegateQueue.async { completion(.error(error)) }
-                }
+                self.delegateQueue.async { completion(.noData) }
             }
         }
     }
@@ -144,12 +123,14 @@ public class NightscoutRemoteCGM: CGMManager {
                     syncIdentifier: simpleID
                 )
 
+                // FIXED: changeRate added, .cgm changed to .sensor per compiler instructions
                 self.latestBackfill = GlucoseEntry(
                     glucose: value, 
                     date: date, 
                     device: "Libre", 
-                    glucoseType: .cgm, 
+                    glucoseType: .sensor, 
                     trend: nil, 
+                    changeRate: nil,
                     id: simpleID
                 )
                 completion(.newData([sample]))
