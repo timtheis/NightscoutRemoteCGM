@@ -47,7 +47,7 @@ public class NightscoutRemoteCGM: CGMManager {
             delegateQueue.async { completion(.noData) }; return
         }
         
-        // LIBRE OVERRIDE
+        // --- LIBRE DIRECT OVERRIDE ---
         let useLibreDirect = true 
 
         processQueue.async {
@@ -59,13 +59,31 @@ public class NightscoutRemoteCGM: CGMManager {
                 }
                 return 
             }
-            
-            // Fallback to Nightscout
+
+            // Fallback to original Nightscout logic
             self.isFetching = true
             self.nightscoutService.client?.fetchRecent { fetchResult in
                 self.isFetching = false
-                // ... original Nightscout logic simplified for build success ...
-                self.delegateQueue.async { completion(.noData) }
+                switch fetchResult {
+                case .success(let glucoseEntries):
+                    let startDate = self.delegate.call { $0?.startDateToFilterNewData(for: self) }
+                    let newSamples = glucoseEntries.filterDateRange(startDate, nil).map { g in
+                        return NewGlucoseSample(
+                            date: g.startDate, 
+                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: g.glucose), 
+                            condition: nil, 
+                            trend: nil, 
+                            trendRate: nil, 
+                            isDisplayOnly: false, 
+                            wasUserEntered: false, 
+                            syncIdentifier: g.id ?? "ns-" + String(Int(g.startDate.timeIntervalSince1970))
+                        )
+                    }
+                    if let max = glucoseEntries.max(by: {$0.startDate < $1.startDate}) { self.latestBackfill = max }
+                    self.delegateQueue.async { completion(newSamples.isEmpty ? .noData : .newData(newSamples)) }
+                case .failure(let error):
+                    self.delegateQueue.async { completion(.error(error)) }
+                }
             }
         }
     }
@@ -113,20 +131,27 @@ public class NightscoutRemoteCGM: CGMManager {
                 formatter.timeZone = TimeZone(identifier: "UTC")
                 let date = formatter.date(from: ts) ?? Date()
                 
-                // ULTRALIGHT INITIALIZER
-                let quantity = HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value)
+                let simpleID = "LLU" + String(Int(date.timeIntervalSince1970))
+                
                 let sample = NewGlucoseSample(
-                    date: date,
-                    quantity: quantity,
-                    condition: nil,
-                    trend: nil,
-                    trendRate: nil,
-                    isDisplayOnly: false,
-                    wasUserEntered: false,
-                    syncIdentifier: "l-\(Int(date.timeIntervalSince1970))"
+                    date: date, 
+                    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value), 
+                    condition: nil, 
+                    trend: nil, 
+                    trendRate: nil, 
+                    isDisplayOnly: false, 
+                    wasUserEntered: false, 
+                    syncIdentifier: simpleID
                 )
 
-                self.latestBackfill = GlucoseEntry(glucose: value, date: date, device: "Libre", glucoseType: .cgm, trend: nil, id: "l-\(Int(date.timeIntervalSince1970))")
+                self.latestBackfill = GlucoseEntry(
+                    glucose: value, 
+                    date: date, 
+                    device: "Libre", 
+                    glucoseType: .cgm, 
+                    trend: nil, 
+                    id: simpleID
+                )
                 completion(.newData([sample]))
             }.resume()
         }
