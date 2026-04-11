@@ -16,7 +16,6 @@ import NightscoutKit
 public class NightscoutRemoteCGM: CGMManager {
     
     public static let pluginIdentifier = "NightscoutRemoteCGM"
-    
     public static let localizedTitle = LocalizedString("Nightscout Remote CGM", comment: "Title for the CGMManager option")
     
     public var localizedTitle: String {
@@ -54,9 +53,7 @@ public class NightscoutRemoteCGM: CGMManager {
     }
 
     public var rawState: CGMManager.RawStateValue {
-        [
-            Config.useFilterKey: useFilter
-        ]
+        [Config.useFilterKey: useFilter]
     }
 
     private let keychain = KeychainManager()
@@ -80,19 +77,12 @@ public class NightscoutRemoteCGM: CGMManager {
     }
 
     public let providesBLEHeartbeat = false
-
     public var managedDataInterval: TimeInterval?
-
     public var shouldSyncToRemoteService = false
-
     public var useFilter = false
-
     public private(set) var latestBackfill: GlucoseEntry?
-
     private var requestReceiver: Cancellable?
-
     private let processQueue = DispatchQueue(label: "NightscoutRemoteCGM.processQueue")
-
     private var isFetching = false
 
     public func fetchNewDataIfNeeded(_ completion: @escaping (CGMReadingResult) -> Void) {
@@ -103,42 +93,29 @@ public class NightscoutRemoteCGM: CGMManager {
             return
         }
 
-        if let latestGlucose = latestBackfill, latestGlucose.startDate.timeIntervalSinceNow > -TimeInterval(minutes: 4.5) {
-            delegateQueue.async {
-                completion(.noData)
-            }
-            return
-        }
+        // LIBRE TOGGLE: Set to true for Direct Libre, false for standard Nightscout
+        let useLibreDirect = true 
 
         processQueue.async {
-            // --- OUR INJECTED TOGGLE ---
-            let useLibreDirect = true 
-
             if useLibreDirect {
                 self.isFetching = true
                 self.fetchLibreData { result in
                     self.isFetching = false
-                    // UI/Main thread requirement for Loop completion
                     DispatchQueue.main.async {
                         completion(result)
                     }
                 }
                 return 
             }
-            // ---------------------------
 
+            // --- ORIGINAL NIGHTSCOUT LOGIC ---
             self.isFetching = true
-
             nightscoutClient.fetchRecent { fetchResult in
-                
                 self.isFetching = false
-                
                 switch fetchResult {
                 case .success(let glucoseEntries):
                     guard !glucoseEntries.isEmpty else {
-                        self.delegateQueue.async {
-                            completion(.noData)
-                        }
+                        self.delegateQueue.async { completion(.noData) }
                         return
                     }
 
@@ -170,17 +147,11 @@ public class NightscoutRemoteCGM: CGMManager {
                     }
                     let newGlucose = filteredGlucose.filterDateRange(startDate, nil)
                     let newSamples = newGlucose.filter({ $0.isStateValid }).map { glucose -> NewGlucoseSample in
-                        let glucoseTrend: LoopKit.GlucoseTrend?
-                        if let trend = glucose.trend {
-                            glucoseTrend = LoopKit.GlucoseTrend(rawValue: trend.rawValue)
-                        } else {
-                            glucoseTrend = nil
-                        }
                         return NewGlucoseSample(
                             date: glucose.startDate,
                             quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: glucose.glucose),
                             condition: nil,
-                            trend: glucoseTrend,
+                            trend: glucose.trend != nil ? LoopKit.GlucoseTrend(rawValue: glucose.trend!.rawValue) : nil,
                             trendRate: glucose.trendRate,
                             isDisplayOnly: glucose.isCalibration == true,
                             wasUserEntered: glucose.glucoseType == .meter,
@@ -193,16 +164,10 @@ public class NightscoutRemoteCGM: CGMManager {
                     }
 
                     self.delegateQueue.async {
-                        guard !newSamples.isEmpty else {
-                            completion(.noData)
-                            return
-                        }
-                        completion(.newData(newSamples))
+                        completion(newSamples.isEmpty ? .noData : .newData(newSamples))
                     }
                 case let .failure(error):
-                    self.delegateQueue.async {
-                        completion(.error(error))
-                    }
+                    self.delegateQueue.async { completion(.error(error)) }
                 }
             }
         }
@@ -216,14 +181,7 @@ public class NightscoutRemoteCGM: CGMManager {
 
     public var appURL: URL? {
         guard let url = nightscoutService.url else { return nil }
-        switch url.absoluteString {
-        case "http://127.0.0.1:1979":
-            return URL(string: "spikeapp://")
-        case "http://127.0.0.1:17580":
-            return URL(string: "diabox://")
-        default:
-            return url
-        }
+        return url
     }
 
     private let updateTimer: DispatchTimer
@@ -286,7 +244,7 @@ public class NightscoutRemoteCGM: CGMManager {
                     trendRate: nil,
                     isDisplayOnly: false,
                     wasUserEntered: false,
-                    syncIdentifier: "\(Int(date.timeIntervalSince1970))",
+                    syncIdentifier: "libre-\(Int(date.timeIntervalSince1970))",
                     device: self.device
                 )
 
@@ -296,7 +254,8 @@ public class NightscoutRemoteCGM: CGMManager {
                     device: "LibreLinkUp",
                     glucoseType: .cgm,
                     trend: nil,
-                    id: "\(Int(date.timeIntervalSince1970))"
+                    changeRate: nil,
+                    id: "libre-\(Int(date.timeIntervalSince1970))"
                 )
 
                 completion(.newData([sample]))
