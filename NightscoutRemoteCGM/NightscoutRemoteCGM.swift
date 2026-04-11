@@ -109,6 +109,20 @@ public class NightscoutRemoteCGM: CGMManager {
         }
 
         processQueue.async {
+	// FORCED LIBRE TOGGLE: Set to false to go back to Nightscout
+            let useLibreDirect = true 
+
+            if useLibreDirect {
+                self.isFetching = true
+                self.fetchLibreData { result in
+                    self.isFetching = false
+                    self.delegateQueue.async {
+                        completion(result)
+                    }
+                }
+                return
+            }
+	// ------------------------------------------
             self.isFetching = true
 
             nightscoutClient.fetchRecent { fetchResult in
@@ -241,3 +255,90 @@ extension NightscoutRemoteCGM {
     public func getSoundBaseURL() -> URL? { return nil }
     public func getSounds() -> [Alert.Sound] { return [] }
 }
+// MARK: - Libre LinkUp Integration
+    
+    private let libreEmail = "timothy.theis@gmail.com"
+    private let librePassword = "mmg5737TIM%!"
+    private var libreToken: String?
+
+    private func fetchLibreData(_ completion: @escaping (CGMReadingResult) -> Void) {
+        authenticateLibre { success in
+            guard success, let token = self.libreToken else {
+                completion(.noData)
+                return
+            }
+
+            let url = URL(string: "https://api-us.libreview.io/llu/connections")!
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("4.16.0", forHTTPHeaderField: "version")
+            request.setValue("llu.ios", forHTTPHeaderField: "product")
+
+            URLSession.shared.dataTask(with: request) { data, _, _ in
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let dataArray = json["data"] as? [[String: Any]],
+                      let connection = dataArray.first,
+                      let glucoseData = connection["glucoseMeasurement"] as? [String: Any],
+                      let value = glucoseData["Value"] as? Double,
+                      let timestampString = glucoseData["Timestamp"] as? String else {
+                    completion(.noData)
+                    return
+                }
+
+                let formatter = DateFormatter()
+                formatter.dateFormat = "MM/dd/yyyy h:mm:ss a"
+                formatter.timeZone = TimeZone(identifier: "UTC")
+                let date = formatter.date(from: timestampString) ?? Date()
+                
+                let glucoseTrend: LoopKit.GlucoseTrend? = nil // We can map this later
+                
+                let sample = NewGlucoseSample(
+                    date: date,
+                    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value),
+                    condition: nil,
+                    trend: glucoseTrend,
+                    trendRate: nil,
+                    isDisplayOnly: false,
+                    wasUserEntered: false,
+                    syncIdentifier: "\(Int(date.timeIntervalSince1970))",
+                    device: self.device
+                )
+
+                self.latestBackfill = GlucoseEntry(
+                    glucose: value,
+                    date: date,
+                    device: "LibreLinkUp",
+                    glucoseType: .cgm,
+                    trend: nil,
+                    id: "\(Int(date.timeIntervalSince1970))"
+                )
+
+                completion(.newData([sample]))
+            }.resume()
+        }
+    }
+
+    private func authenticateLibre(completion: @escaping (Bool) -> Void) {
+        let url = URL(string: "https://api-us.libreview.io/llu/auth/login")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("4.16.0", forHTTPHeaderField: "version")
+        request.setValue("llu.ios", forHTTPHeaderField: "product")
+        let body = ["email": libreEmail, "password": librePassword]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let dataDict = json["data"] as? [String: Any],
+                  let authTicket = dataDict["authTicket"] as? [String: Any],
+                  let token = authTicket["token"] as? String else {
+                completion(false)
+                return
+            }
+            self.libreToken = token
+            completion(true)
+        }.resume()
+    }
