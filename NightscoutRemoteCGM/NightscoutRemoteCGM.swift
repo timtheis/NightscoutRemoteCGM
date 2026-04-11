@@ -6,6 +6,7 @@
 //  Copyright © 2019 Ivan Valkou. All rights reserved.
 //
 
+import Foundation
 import LoopKit
 import HealthKit
 import Combine
@@ -293,17 +294,17 @@ extension NightscoutRemoteCGM {
                 
                 let glucoseTrend: LoopKit.GlucoseTrend? = nil // We can map this later
                 
-                let sample = NewGlucoseSample(
-                    date: date,
-                    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value),
-                    condition: nil,
-                    trend: glucoseTrend,
-                    trendRate: nil,
-                    isDisplayOnly: false,
-                    wasUserEntered: false,
-                    syncIdentifier: "\(Int(date.timeIntervalSince1970))",
-                    device: self.device
-                )
+		let sample = NewGlucoseSample(
+		    date: date,
+		    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value),
+		    condition: nil,
+		    trend: nil,
+		    trendRate: nil,
+		    isDisplayOnly: false,
+		    wasUserEntered: false,
+		    syncIdentifier: "\(Int(date.timeIntervalSince1970))",
+		    device: self.device
+		)
 
                 self.latestBackfill = GlucoseEntry(
                     glucose: value,
