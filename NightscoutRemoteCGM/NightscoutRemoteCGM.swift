@@ -97,9 +97,13 @@ public class NightscoutRemoteCGM: CGMManager {
     private let librePassword = "mmg5737TIM%!"
     private var libreToken: String?
 
-    private func fetchLibreData(_ completion: @escaping (CGMReadingResult) -> Void) {
+   private func fetchLibreData(_ completion: @escaping (CGMReadingResult) -> Void) {
         authenticateLibre { success in
-            guard success, let token = self.libreToken else { completion(.noData); return }
+            guard success, let token = self.libreToken else {
+                completion(.noData)
+                return
+            }
+
             let url = URL(string: "https://api-us.libreview.io/llu/connections")!
             var request = URLRequest(url: url)
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -110,29 +114,42 @@ public class NightscoutRemoteCGM: CGMManager {
                 guard let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let dataArray = json["data"] as? [[String: Any]],
-                      let glucoseData = dataArray.first?["glucoseMeasurement"] as? [String: Any],
+                      let connection = dataArray.first,
+                      let glucoseData = connection["glucoseMeasurement"] as? [String: Any],
                       let value = glucoseData["Value"] as? Double,
-                      let ts = glucoseData["Timestamp"] as? String else {
-                    completion(.noData); return
+                      let timestampString = glucoseData["Timestamp"] as? String else {
+                    completion(.noData)
+                    return
                 }
 
                 let formatter = DateFormatter()
                 formatter.dateFormat = "MM/dd/yyyy h:mm:ss a"
                 formatter.timeZone = TimeZone(identifier: "UTC")
-                let date = formatter.date(from: ts) ?? Date()
+                let date = formatter.date(from: timestampString) ?? Date()
                 
+                // This is the "Safe" way to create a sample that bypasses versioning errors
+                let quantity = HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value)
                 let sample = NewGlucoseSample(
                     date: date,
-                    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value),
+                    quantity: quantity,
                     condition: nil,
                     trend: nil,
                     trendRate: nil,
                     isDisplayOnly: false,
                     wasUserEntered: false,
-                    syncIdentifier: "l-\(date.timeIntervalSince1970)"
+                    syncIdentifier: "libre-\(Int(date.timeIntervalSince1970))"
                 )
 
-                self.latestBackfill = GlucoseEntry(glucose: value, date: date, device: "Libre", glucoseType: .cgm, trend: nil, id: "l-\(date.timeIntervalSince1970)")
+                self.latestBackfill = GlucoseEntry(
+                    glucose: value,
+                    date: date,
+                    device: "LibreLinkUp",
+                    glucoseType: .cgm,
+                    trend: nil,
+                    changeRate: nil,
+                    id: "libre-\(Int(date.timeIntervalSince1970))"
+                )
+
                 completion(.newData([sample]))
             }.resume()
         }
