@@ -114,15 +114,16 @@ public class NightscoutRemoteCGM: CGMManager {
 	// FORCED LIBRE TOGGLE: Set to false to go back to Nightscout
             let useLibreDirect = true 
 
-            if useLibreDirect {
+	    if useLibreDirect {
                 self.isFetching = true
                 self.fetchLibreData { result in
                     self.isFetching = false
-                    self.delegateQueue.async {
+                    // We must return to the main thread or delegate queue
+                    DispatchQueue.main.async {
                         completion(result)
                     }
                 }
-                return
+                return 
             }
 	// ------------------------------------------
             self.isFetching = true
