@@ -121,7 +121,16 @@ public class NightscoutRemoteCGM: CGMManager {
                 formatter.timeZone = TimeZone(identifier: "UTC")
                 let date = formatter.date(from: ts) ?? Date()
                 
-                let sample = NewGlucoseSample(date: date, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value), condition: nil, trend: nil, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: "l-\(date.timeIntervalSince1970)", device: self.device)
+                let sample = NewGlucoseSample(
+                    date: date,
+                    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: value),
+                    condition: nil,
+                    trend: nil,
+                    trendRate: nil,
+                    isDisplayOnly: false,
+                    wasUserEntered: false,
+                    syncIdentifier: "l-\(date.timeIntervalSince1970)"
+                )
 
                 self.latestBackfill = GlucoseEntry(glucose: value, date: date, device: "Libre", glucoseType: .cgm, trend: nil, id: "l-\(date.timeIntervalSince1970)")
                 completion(.newData([sample]))
