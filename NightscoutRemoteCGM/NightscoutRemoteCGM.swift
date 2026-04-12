@@ -65,7 +65,7 @@ public class NightscoutRemoteCGM: CGMManager {
         guard let url = nightscoutService.url else { completion(.noData); return }
         
         // Fixed: Swapped to the correct NightscoutFetcher class
-        let fetcher = NightscoutFetcher(siteURL: url, apiSecret: nightscoutService.apiSecret)
+        let fetcher = NightscoutFetcher(url: url, apiSecret: nightscoutService.apiSecret ?? "")
         fetcher.fetchGlucose(since: Date().addingTimeInterval(.hours(-24))) { (result) in
             switch result {
             case .success(let entries):
