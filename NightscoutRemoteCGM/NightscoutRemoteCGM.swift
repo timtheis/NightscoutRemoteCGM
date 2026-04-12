@@ -113,23 +113,22 @@ public class NightscoutRemoteCGM: CGMManager {
                       let dArray = j["data"] as? [[String: Any]],
                       let conn = dArray.first,
                       let gData = conn["glucoseMeasurement"] as? [String: Any],
-                      let valNumber = gData["Value"] as? NSNumber, // Fix: Use NSNumber to handle integers
-                      let ts = gData["FactoryTimestamp"] as? String else { // Fix: Pull the actual UTC timestamp
+                      let valNumber = gData["Value"] as? NSNumber,
+                      let ts = gData["FactoryTimestamp"] as? String else {
                     completion(.noData); return
                 }
 
                 let val = valNumber.doubleValue
 
-                // Fix: Parse the date safely
                 let fmt = DateFormatter()
                 fmt.dateFormat = "M/d/yyyy h:mm:ss a" 
                 fmt.timeZone = TimeZone(identifier: "UTC")
                 let date = fmt.date(from: ts) ?? Date()
                 let sID = "LLU" + String(Int(date.timeIntervalSince1970))
                 
-                // Layer 1: Trend Arrows mapped to LoopKit
+                // Layer 1: Trend Arrows mapped explicitly to LoopKit
                 let trendInt = gData["TrendArrow"] as? Int
-                var loopTrend: GlucoseTrend? = nil
+                var loopTrend: LoopKit.GlucoseTrend? = nil // Fix: Explicitly declare LoopKit type
                 if let t = trendInt {
                     switch t {
                     case 1: loopTrend = .downDown
@@ -141,14 +140,16 @@ public class NightscoutRemoteCGM: CGMManager {
                     }
                 }
 
+                // LoopKit gets the arrow (this drives the main app logic)
                 let sample = NewGlucoseSample(
                     date: date, 
                     quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: val), 
                     condition: nil, trend: loopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: sID
                 )
 
+                // NightscoutKit gets 'nil' for the trend to prevent the compiler crash
                 self.latestBackfill = GlucoseEntry(
-                    glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: loopTrend, changeRate: nil, id: sID
+                    glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: sID
                 )
                 completion(.newData([sample]))
             }.resume()
