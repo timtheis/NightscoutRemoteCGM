@@ -27,13 +27,16 @@ final class SettingsViewModel: ObservableObject {
     @Published var librePassword: String {
         didSet { UserDefaults.standard.set(librePassword, forKey: "com.loopkit.NightscoutRemoteCGM.LibrePassword") }
     }
-    
-    // Nightscout States mapped to the original service
-    @Published var nightscoutURL: String {
-        didSet { nightscoutService.url = URL(string: nightscoutURL) }
+    @Published var libreRegion: String {
+        didSet { UserDefaults.standard.set(libreRegion, forKey: "com.loopkit.NightscoutRemoteCGM.LibreRegion") }
     }
-    @Published var nightscoutSecret: String {
-        didSet { nightscoutService.apiSecret = nightscoutSecret }
+    @Published var libreVersion: String {
+        didSet { UserDefaults.standard.set(libreVersion, forKey: "com.loopkit.NightscoutRemoteCGM.LibreVersion") }
+    }
+    
+    // Nightscout States (Read-Only)
+    var url: String {
+        return nightscoutService.url?.absoluteString ?? ""
     }
     
     let onDelete = PassthroughSubject<Void, Never>()
@@ -47,9 +50,9 @@ final class SettingsViewModel: ObservableObject {
         self.libreEmail = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibreEmail") ?? ""
         self.librePassword = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibrePassword") ?? ""
         
-        // Initialize Nightscout from existing service/keychain
-        self.nightscoutURL = nightscoutService.url?.absoluteString ?? ""
-        self.nightscoutSecret = nightscoutService.apiSecret ?? ""
+        // Provide smart defaults for the new fields if they don't exist yet
+        self.libreRegion = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibreRegion") ?? "us"
+        self.libreVersion = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibreVersion") ?? "4.16.0"
     }
     
     func viewDidAppear(){
@@ -116,18 +119,27 @@ public struct SettingsView: View {
                         
                         SecureField("Password", text: $viewModel.librePassword)
                     }
+                    
+                    Section(header: Text("Advanced Connection Settings")) {
+                        TextField("Region Code (e.g., us, eu)", text: $viewModel.libreRegion)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                            
+                        TextField("App Version (e.g., 4.16.0)", text: $viewModel.libreVersion)
+                            .keyboardType(.numbersAndPunctuation)
+                            .disableAutocorrection(true)
+                    }
+                    
                     Section(footer: Text("Pulling 1-minute data directly from Abbott. Nightscout settings are bypassed.")) {
                         EmptyView()
                     }
                 } else {
                     Section(header: Text("Nightscout Connection")) {
-                        TextField("Nightscout URL", text: $viewModel.nightscoutURL)
-                            .keyboardType(.URL)
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
-                        
-                        SecureField("API Secret", text: $viewModel.nightscoutSecret)
-                        
+                        HStack {
+                            Text("URL")
+                            Spacer()
+                            Text(viewModel.url).foregroundColor(.secondary)
+                        }
                         HStack {
                             Text("Status")
                             Spacer()
