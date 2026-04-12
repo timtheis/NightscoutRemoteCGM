@@ -28,8 +28,12 @@ final class SettingsViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(librePassword, forKey: "com.loopkit.NightscoutRemoteCGM.LibrePassword") }
     }
     
-    var url: String {
-        return nightscoutService.url?.absoluteString ?? ""
+    // Nightscout States mapped to the original service
+    @Published var nightscoutURL: String {
+        didSet { nightscoutService.url = URL(string: nightscoutURL) }
+    }
+    @Published var nightscoutSecret: String {
+        didSet { nightscoutService.apiSecret = nightscoutSecret }
     }
     
     let onDelete = PassthroughSubject<Void, Never>()
@@ -38,10 +42,14 @@ final class SettingsViewModel: ObservableObject {
     init(nightscoutService: NightscoutAPIService) {
         self.nightscoutService = nightscoutService
         
-        // Initialize from UserDefaults
+        // Initialize Libre from UserDefaults
         self.useDirectLibre = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.UseDirectLibre") == "true"
         self.libreEmail = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibreEmail") ?? ""
         self.librePassword = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibrePassword") ?? ""
+        
+        // Initialize Nightscout from existing service/keychain
+        self.nightscoutURL = nightscoutService.url?.absoluteString ?? ""
+        self.nightscoutSecret = nightscoutService.apiSecret ?? ""
     }
     
     func viewDidAppear(){
@@ -113,11 +121,13 @@ public struct SettingsView: View {
                     }
                 } else {
                     Section(header: Text("Nightscout Connection")) {
-                        HStack {
-                            Text("URL")
-                            Spacer()
-                            Text(viewModel.url).foregroundColor(.secondary)
-                        }
+                        TextField("Nightscout URL", text: $viewModel.nightscoutURL)
+                            .keyboardType(.URL)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                        
+                        SecureField("API Secret", text: $viewModel.nightscoutSecret)
+                        
                         HStack {
                             Text("Status")
                             Spacer()
