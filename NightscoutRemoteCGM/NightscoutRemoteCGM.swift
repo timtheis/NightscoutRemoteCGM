@@ -17,7 +17,8 @@ public class NightscoutRemoteCGM: CGMManager {
 
     public init() {
         nightscoutService = NightscoutAPIService(keychainManager: keychain)
-        updateTimer = DispatchTimer(timeInterval: 10, queue: processQueue)
+        // 1. TIMING FIX: Set to 60 seconds to match the 1-minute data heartbeat
+        updateTimer = DispatchTimer(timeInterval: 60, queue: processQueue)
         scheduleUpdateTimer()
     }
 
@@ -34,7 +35,7 @@ public class NightscoutRemoteCGM: CGMManager {
     public let providesBLEHeartbeat = false
     public var managedDataInterval: TimeInterval?
     public var shouldSyncToRemoteService = false
-    public var useFilter = false
+    public var useFilter = true // Keep this enabled
     public private(set) var latestBackfill: GlucoseEntry?
     private let processQueue = DispatchQueue(label: "NightscoutRemoteCGM.processQueue")
     private var isFetching = false
@@ -43,7 +44,6 @@ public class NightscoutRemoteCGM: CGMManager {
         guard !isFetching else {
             delegateQueue.async { completion(.noData) }; return
         }
-        
         processQueue.async {
             self.isFetching = true
             self.fetchLibreData { result in
@@ -68,12 +68,38 @@ public class NightscoutRemoteCGM: CGMManager {
         updateTimer.resume()
     }
 
+    // --- LAYER 2: KALMAN FILTER ---
+    private var kalmanEstimate: Double? = nil
+    private var kalmanError: Double = 1.0
+    private let kalmanQ: Double = 0.05 // Process Variance (How fast true BG changes)
+    private let kalmanR: Double = 3.0  // Measurement Variance (How much we trust the sensor)
+
+    private func resetKalman() {
+        kalmanEstimate = nil
+        kalmanError = 1.0
+    }
+
+    private func applyKalman(rawGlucose: Double) -> Double {
+        guard let estimate = kalmanEstimate else {
+            kalmanEstimate = rawGlucose
+            return rawGlucose
+        }
+        let predictedEstimate = estimate
+        let predictedError = kalmanError + kalmanQ
+        
+        let kalmanGain = predictedError / (predictedError + kalmanR)
+        let newEstimate = predictedEstimate + kalmanGain * (rawGlucose - predictedEstimate)
+        kalmanError = (1 - kalmanGain) * predictedError
+        
+        kalmanEstimate = newEstimate
+        return newEstimate
+    }
+
     // --- LIBRE INTEGRATION ---
     private let lEmail = "timothy.theis@gmail.com"
     private let lPass = "mmg5737TIM%!"
     
     private func fetchLibreData(_ completion: @escaping (CGMReadingResult) -> Void) {
-        // Step 1: Login
         let authUrl = URL(string: "https://api-us.libreview.io/llu/auth/login")!
         var authReq = URLRequest(url: authUrl)
         authReq.httpMethod = "POST"
@@ -98,7 +124,6 @@ public class NightscoutRemoteCGM: CGMManager {
             let hashedId = SHA256.hash(data: userIdData)
             let accountId = hashedId.compactMap { String(format: "%02x", $0) }.joined()
 
-            // Step 2: Get Connections
             let connUrl = URL(string: "https://api-us.libreview.io/llu/connections")!
             var connReq = URLRequest(url: connUrl)
             connReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -106,48 +131,44 @@ public class NightscoutRemoteCGM: CGMManager {
             connReq.setValue("llu.ios", forHTTPHeaderField: "product")
             connReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
             connReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
+            
+            // 2. CACHE BUSTER: Force iOS to fetch the 1-minute data directly from Abbott
+            connReq.cachePolicy = .reloadIgnoringLocalCacheData
 
             URLSession.shared.dataTask(with: connReq) { d, _, _ in
                 guard let d = d,
                       let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                       let dArray = j["data"] as? [[String: Any]],
                       let conn = dArray.first,
-                      let patientId = conn["patientId"] as? String, // Extracted for Step 3
+                      let patientId = conn["patientId"] as? String,
                       let gData = conn["glucoseMeasurement"] as? [String: Any],
                       let valNumber = gData["Value"] as? NSNumber,
                       let ts = gData["FactoryTimestamp"] as? String else {
                     completion(.noData); return
                 }
 
-                let val = valNumber.doubleValue
+                let currentVal = valNumber.doubleValue
                 let fmt = DateFormatter()
                 fmt.dateFormat = "M/d/yyyy h:mm:ss a" 
                 fmt.timeZone = TimeZone(identifier: "UTC")
-                let date = fmt.date(from: ts) ?? Date()
-                let sID = "LLU" + String(Int(date.timeIntervalSince1970))
+                let currentDate = fmt.date(from: ts) ?? Date()
+                let currentSID = "LLU" + String(Int(currentDate.timeIntervalSince1970))
                 
-                let trendInt = gData["TrendArrow"] as? Int
-                var loopTrend: LoopKit.GlucoseTrend? = nil
-                if let t = trendInt {
+                let currentTrendInt = gData["TrendArrow"] as? Int
+                var currentLoopTrend: LoopKit.GlucoseTrend? = nil
+                if let t = currentTrendInt {
                     switch t {
-                    case 1: loopTrend = .downDown
-                    case 2: loopTrend = .down
-                    case 3: loopTrend = .flat
-                    case 4: loopTrend = .up
-                    case 5: loopTrend = .upUp
+                    case 1: currentLoopTrend = .downDown
+                    case 2: currentLoopTrend = .down
+                    case 3: currentLoopTrend = .flat
+                    case 4: currentLoopTrend = .up
+                    case 5: currentLoopTrend = .upUp
                     default: break
                     }
                 }
 
-                let currentSample = NewGlucoseSample(
-                    date: date, 
-                    quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: val), 
-                    condition: nil, trend: loopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: sID
-                )
-
-                // --- SMART BACKFILL LOGIC ---
+                // SMART BACKFILL LOGIC
                 if self.latestBackfill == nil {
-                    // Step 3: Fetch Graph for History (Only runs on startup)
                     let graphUrl = URL(string: "https://api-us.libreview.io/llu/connections/\(patientId)/graph")!
                     var graphReq = URLRequest(url: graphUrl)
                     graphReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -155,9 +176,10 @@ public class NightscoutRemoteCGM: CGMManager {
                     graphReq.setValue("llu.ios", forHTTPHeaderField: "product")
                     graphReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     graphReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
+                    graphReq.cachePolicy = .reloadIgnoringLocalCacheData // Cache buster for history
 
                     URLSession.shared.dataTask(with: graphReq) { gd, _, _ in
-                        var samples: [NewGlucoseSample] = []
+                        var rawPoints: [(date: Date, val: Double, trend: LoopKit.GlucoseTrend?, id: String)] = []
                         
                         if let gd = gd,
                            let gj = try? JSONSerialization.jsonObject(with: gd) as? [String: Any],
@@ -167,10 +189,8 @@ public class NightscoutRemoteCGM: CGMManager {
                             for gItem in graphData {
                                 if let gValNum = gItem["Value"] as? NSNumber,
                                    let gTs = gItem["FactoryTimestamp"] as? String {
-                                   
                                     let gDate = fmt.date(from: gTs) ?? Date()
                                     let gID = "LLU" + String(Int(gDate.timeIntervalSince1970))
-                                    
                                     let gTrendInt = gItem["TrendArrow"] as? Int
                                     var gLoopTrend: LoopKit.GlucoseTrend? = nil
                                     if let t = gTrendInt {
@@ -183,38 +203,47 @@ public class NightscoutRemoteCGM: CGMManager {
                                         default: break
                                         }
                                     }
-                                    
-                                    samples.append(NewGlucoseSample(
-                                        date: gDate, 
-                                        quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: gValNum.doubleValue), 
-                                        condition: nil, trend: gLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: gID
-                                    ))
+                                    rawPoints.append((date: gDate, val: gValNum.doubleValue, trend: gLoopTrend, id: gID))
                                 }
                             }
                         }
                         
-                        // Always include the absolute latest point
-                        samples.append(currentSample)
+                        rawPoints.append((date: currentDate, val: currentVal, trend: currentLoopTrend, id: currentSID))
+                        rawPoints.sort { $0.date < $1.date }
                         
-                        // Sort chronologically so Loop processes the array perfectly
-                        samples.sort { $0.date < $1.date }
+                        self.resetKalman()
+                        var samples: [NewGlucoseSample] = []
+                        var finalSmoothedVal: Double = currentVal
                         
-                        // Mark backfill as complete
+                        for p in rawPoints {
+                            let smoothedVal = self.applyKalman(rawGlucose: p.val)
+                            finalSmoothedVal = smoothedVal
+                            samples.append(NewGlucoseSample(
+                                date: p.date, 
+                                quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: smoothedVal), 
+                                condition: nil, trend: p.trend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: p.id
+                            ))
+                        }
+                        
                         self.latestBackfill = GlucoseEntry(
-                            glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: sID
+                            glucose: finalSmoothedVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID
                         )
                         completion(.newData(samples))
                     }.resume()
                     
                 } else {
-                    // We already have history. Just check if the newest point is actually new.
-                    if date > self.latestBackfill!.date {
-                        self.latestBackfill = GlucoseEntry(
-                            glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: sID
+                    if currentDate > self.latestBackfill!.date {
+                        let smoothedVal = self.applyKalman(rawGlucose: currentVal)
+                        let sample = NewGlucoseSample(
+                            date: currentDate, 
+                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: smoothedVal), 
+                            condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID
                         )
-                        completion(.newData([currentSample]))
+                        self.latestBackfill = GlucoseEntry(
+                            glucose: smoothedVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID
+                        )
+                        completion(.newData([sample]))
                     } else {
-                        // The server hasn't updated yet, keep waiting
                         completion(.noData)
                     }
                 }
