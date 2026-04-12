@@ -112,6 +112,7 @@ public class NightscoutRemoteCGM: CGMManager {
                       let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                       let dArray = j["data"] as? [[String: Any]],
                       let conn = dArray.first,
+                      let patientId = conn["patientId"] as? String, // Extracted for Step 3
                       let gData = conn["glucoseMeasurement"] as? [String: Any],
                       let valNumber = gData["Value"] as? NSNumber,
                       let ts = gData["FactoryTimestamp"] as? String else {
@@ -119,16 +120,14 @@ public class NightscoutRemoteCGM: CGMManager {
                 }
 
                 let val = valNumber.doubleValue
-
                 let fmt = DateFormatter()
                 fmt.dateFormat = "M/d/yyyy h:mm:ss a" 
                 fmt.timeZone = TimeZone(identifier: "UTC")
                 let date = fmt.date(from: ts) ?? Date()
                 let sID = "LLU" + String(Int(date.timeIntervalSince1970))
                 
-                // Layer 1: Trend Arrows mapped explicitly to LoopKit
                 let trendInt = gData["TrendArrow"] as? Int
-                var loopTrend: LoopKit.GlucoseTrend? = nil // Fix: Explicitly declare LoopKit type
+                var loopTrend: LoopKit.GlucoseTrend? = nil
                 if let t = trendInt {
                     switch t {
                     case 1: loopTrend = .downDown
@@ -140,18 +139,85 @@ public class NightscoutRemoteCGM: CGMManager {
                     }
                 }
 
-                // LoopKit gets the arrow (this drives the main app logic)
-                let sample = NewGlucoseSample(
+                let currentSample = NewGlucoseSample(
                     date: date, 
                     quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: val), 
                     condition: nil, trend: loopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: sID
                 )
 
-                // NightscoutKit gets 'nil' for the trend to prevent the compiler crash
-                self.latestBackfill = GlucoseEntry(
-                    glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: sID
-                )
-                completion(.newData([sample]))
+                // --- SMART BACKFILL LOGIC ---
+                if self.latestBackfill == nil {
+                    // Step 3: Fetch Graph for History (Only runs on startup)
+                    let graphUrl = URL(string: "https://api-us.libreview.io/llu/connections/\(patientId)/graph")!
+                    var graphReq = URLRequest(url: graphUrl)
+                    graphReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    graphReq.setValue("4.16.0", forHTTPHeaderField: "version")
+                    graphReq.setValue("llu.ios", forHTTPHeaderField: "product")
+                    graphReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    graphReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
+
+                    URLSession.shared.dataTask(with: graphReq) { gd, _, _ in
+                        var samples: [NewGlucoseSample] = []
+                        
+                        if let gd = gd,
+                           let gj = try? JSONSerialization.jsonObject(with: gd) as? [String: Any],
+                           let gdDict = gj["data"] as? [String: Any],
+                           let graphData = gdDict["graphData"] as? [[String: Any]] {
+                            
+                            for gItem in graphData {
+                                if let gValNum = gItem["Value"] as? NSNumber,
+                                   let gTs = gItem["FactoryTimestamp"] as? String {
+                                   
+                                    let gDate = fmt.date(from: gTs) ?? Date()
+                                    let gID = "LLU" + String(Int(gDate.timeIntervalSince1970))
+                                    
+                                    let gTrendInt = gItem["TrendArrow"] as? Int
+                                    var gLoopTrend: LoopKit.GlucoseTrend? = nil
+                                    if let t = gTrendInt {
+                                        switch t {
+                                        case 1: gLoopTrend = .downDown
+                                        case 2: gLoopTrend = .down
+                                        case 3: gLoopTrend = .flat
+                                        case 4: gLoopTrend = .up
+                                        case 5: gLoopTrend = .upUp
+                                        default: break
+                                        }
+                                    }
+                                    
+                                    samples.append(NewGlucoseSample(
+                                        date: gDate, 
+                                        quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: gValNum.doubleValue), 
+                                        condition: nil, trend: gLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: gID
+                                    ))
+                                }
+                            }
+                        }
+                        
+                        // Always include the absolute latest point
+                        samples.append(currentSample)
+                        
+                        // Sort chronologically so Loop processes the array perfectly
+                        samples.sort { $0.date < $1.date }
+                        
+                        // Mark backfill as complete
+                        self.latestBackfill = GlucoseEntry(
+                            glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: sID
+                        )
+                        completion(.newData(samples))
+                    }.resume()
+                    
+                } else {
+                    // We already have history. Just check if the newest point is actually new.
+                    if date > self.latestBackfill!.date {
+                        self.latestBackfill = GlucoseEntry(
+                            glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: sID
+                        )
+                        completion(.newData([currentSample]))
+                    } else {
+                        // The server hasn't updated yet, keep waiting
+                        completion(.noData)
+                    }
+                }
             }.resume()
         }.resume()
     }
