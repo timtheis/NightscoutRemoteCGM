@@ -94,7 +94,6 @@ public class NightscoutRemoteCGM: CGMManager {
                 completion(.noData); return
             }
 
-            // Generate SHA-256 Hash of User ID for Abbott's new security requirements
             let userIdData = Data(userId.utf8)
             let hashedId = SHA256.hash(data: userIdData)
             let accountId = hashedId.compactMap { String(format: "%02x", $0) }.joined()
@@ -106,7 +105,7 @@ public class NightscoutRemoteCGM: CGMManager {
             connReq.setValue("4.16.0", forHTTPHeaderField: "version")
             connReq.setValue("llu.ios", forHTTPHeaderField: "product")
             connReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            connReq.setValue(accountId, forHTTPHeaderField: "Account-Id") // THE MISSING PIECE
+            connReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
 
             URLSession.shared.dataTask(with: connReq) { d, _, _ in
                 guard let d = d,
@@ -114,25 +113,42 @@ public class NightscoutRemoteCGM: CGMManager {
                       let dArray = j["data"] as? [[String: Any]],
                       let conn = dArray.first,
                       let gData = conn["glucoseMeasurement"] as? [String: Any],
-                      let val = gData["Value"] as? Double,
-                      let ts = gData["Timestamp"] as? String else {
+                      let valNumber = gData["Value"] as? NSNumber, // Fix: Use NSNumber to handle integers
+                      let ts = gData["FactoryTimestamp"] as? String else { // Fix: Pull the actual UTC timestamp
                     completion(.noData); return
                 }
 
+                let val = valNumber.doubleValue
+
+                // Fix: Parse the date safely
                 let fmt = DateFormatter()
-                fmt.dateFormat = "MM/dd/yyyy h:mm:ss a"
+                fmt.dateFormat = "M/d/yyyy h:mm:ss a" 
                 fmt.timeZone = TimeZone(identifier: "UTC")
                 let date = fmt.date(from: ts) ?? Date()
                 let sID = "LLU" + String(Int(date.timeIntervalSince1970))
                 
+                // Layer 1: Trend Arrows mapped to LoopKit
+                let trendInt = gData["TrendArrow"] as? Int
+                var loopTrend: GlucoseTrend? = nil
+                if let t = trendInt {
+                    switch t {
+                    case 1: loopTrend = .downDown
+                    case 2: loopTrend = .down
+                    case 3: loopTrend = .flat
+                    case 4: loopTrend = .up
+                    case 5: loopTrend = .upUp
+                    default: break
+                    }
+                }
+
                 let sample = NewGlucoseSample(
                     date: date, 
                     quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: val), 
-                    condition: nil, trend: nil, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: sID
+                    condition: nil, trend: loopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: sID
                 )
 
                 self.latestBackfill = GlucoseEntry(
-                    glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: sID
+                    glucose: val, date: date, device: "Libre", glucoseType: .sensor, trend: loopTrend, changeRate: nil, id: sID
                 )
                 completion(.newData([sample]))
             }.resume()
