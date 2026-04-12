@@ -14,19 +14,18 @@ private let frameworkBundle = Bundle(for: SettingsViewModel.self)
 
 final class SettingsViewModel: ObservableObject {
     let nightscoutService: NightscoutAPIService
-    let keychain = KeychainManager() // Access our new keychain extension
     
     @Published var serviceStatus: SettingsViewServiceStatus = .unknown
     
-    // Libre States
+    // Libre States via UserDefaults
     @Published var useDirectLibre: Bool {
-        didSet { keychain.setUseDirectLibre(useDirectLibre) }
+        didSet { UserDefaults.standard.set(useDirectLibre ? "true" : "false", forKey: "com.loopkit.NightscoutRemoteCGM.UseDirectLibre") }
     }
     @Published var libreEmail: String {
-        didSet { keychain.setLibreCredentials(email: libreEmail, pass: librePassword) }
+        didSet { UserDefaults.standard.set(libreEmail, forKey: "com.loopkit.NightscoutRemoteCGM.LibreEmail") }
     }
     @Published var librePassword: String {
-        didSet { keychain.setLibreCredentials(email: libreEmail, pass: librePassword) }
+        didSet { UserDefaults.standard.set(librePassword, forKey: "com.loopkit.NightscoutRemoteCGM.LibrePassword") }
     }
     
     var url: String {
@@ -38,10 +37,11 @@ final class SettingsViewModel: ObservableObject {
 
     init(nightscoutService: NightscoutAPIService) {
         self.nightscoutService = nightscoutService
-        // Initialize from Keychain
-        self.useDirectLibre = keychain.getUseDirectLibre()
-        self.libreEmail = keychain.getLibreEmail() ?? ""
-        self.librePassword = keychain.getLibrePassword() ?? ""
+        
+        // Initialize from UserDefaults
+        self.useDirectLibre = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.UseDirectLibre") == "true"
+        self.libreEmail = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibreEmail") ?? ""
+        self.librePassword = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibrePassword") ?? ""
     }
     
     func viewDidAppear(){
