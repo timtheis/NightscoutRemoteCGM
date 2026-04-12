@@ -277,7 +277,7 @@ public class NightscoutRemoteCGM: CGMManager {
                     }
                 }
 
-                if self.latestBackfill == nil {
+                if self.latestBackfill == nil || currentDate.timeIntervalSince(self.latestBackfill!.date) > 120 {
                     let graphUrl = URL(string: "https://api-us.libreview.io/llu/connections/\(patientId)/graph")!
                     var graphReq = URLRequest(url: graphUrl)
                     graphReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
