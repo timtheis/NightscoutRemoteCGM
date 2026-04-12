@@ -8,24 +8,46 @@
 
 import SwiftUI
 import Combine
+import LoopKit
 
 private let frameworkBundle = Bundle(for: SettingsViewModel.self)
 
 final class SettingsViewModel: ObservableObject {
     let nightscoutService: NightscoutAPIService
+    let keychain = KeychainManager() // Access our new keychain extension
+    
     @Published var serviceStatus: SettingsViewServiceStatus = .unknown
+    
+    // Libre States
+    @Published var useDirectLibre: Bool {
+        didSet { keychain.setUseDirectLibre(useDirectLibre) }
+    }
+    @Published var libreEmail: String {
+        didSet { keychain.setLibreCredentials(email: libreEmail, pass: librePassword) }
+    }
+    @Published var librePassword: String {
+        didSet { keychain.setLibreCredentials(email: libreEmail, pass: librePassword) }
+    }
+    
     var url: String {
         return nightscoutService.url?.absoluteString ?? ""
     }
+    
     let onDelete = PassthroughSubject<Void, Never>()
     let onClose = PassthroughSubject<Void, Never>()
 
     init(nightscoutService: NightscoutAPIService) {
         self.nightscoutService = nightscoutService
+        // Initialize from Keychain
+        self.useDirectLibre = keychain.getUseDirectLibre()
+        self.libreEmail = keychain.getLibreEmail() ?? ""
+        self.librePassword = keychain.getLibrePassword() ?? ""
     }
     
     func viewDidAppear(){
-        updateServiceStatus()
+        if !useDirectLibre {
+            updateServiceStatus()
+        }
     }
     
     private func updateServiceStatus(){
@@ -48,12 +70,9 @@ final class SettingsViewModel: ObservableObject {
         
         func localizedString() -> String {
             switch self {
-            case .unknown:
-                return ""
-            case .ok:
-                return "OK"
-            case.error(let err):
-                return err.localizedDescription
+            case .unknown: return ""
+            case .ok: return "OK"
+            case .error(let err): return err.localizedDescription
             }
         }
     }
@@ -65,31 +84,48 @@ public struct SettingsView: View {
     
     public var body: some View {
         VStack {
-            Spacer()
             Text(LocalizedString("Nightscout Remote CGM", comment: "Title for the CGMManager option"))
                 .font(.title)
                 .fontWeight(.semibold)
+                .padding(.top)
+
             Image("nightscout", bundle: frameworkBundle)
                 .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 100, height: 100)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 80, height: 80)
+            
             Form {
-                Section {
-                    HStack {
-                        Text("URL")
-                            .padding(.leading, 10)
-                        Spacer()
-                        Text(viewModel.url)
-                            .padding(.leading, 10)
+                Section(header: Text("Data Source")) {
+                    Toggle("Direct Libre LinkUp", isOn: $viewModel.useDirectLibre)
+                }
+
+                if viewModel.useDirectLibre {
+                    Section(header: Text("LibreLinkUp Credentials")) {
+                        TextField("Email", text: $viewModel.libreEmail)
+                            .keyboardType(.emailAddress)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                        
+                        SecureField("Password", text: $viewModel.librePassword)
                     }
-                    HStack {
-                        Text("Status")
-                            .padding(.leading, 10)
-                        Spacer()
-                        Text(String(describing: viewModel.serviceStatus.localizedString()))
-                            .padding(.leading, 10)
+                    Section(footer: Text("Pulling 1-minute data directly from Abbott. Nightscout settings are bypassed.")) {
+                        EmptyView()
+                    }
+                } else {
+                    Section(header: Text("Nightscout Connection")) {
+                        HStack {
+                            Text("URL")
+                            Spacer()
+                            Text(viewModel.url).foregroundColor(.secondary)
+                        }
+                        HStack {
+                            Text("Status")
+                            Spacer()
+                            Text(viewModel.serviceStatus.localizedString()).foregroundColor(.secondary)
+                        }
                     }
                 }
+                
                 Section {
                     HStack {
                         Spacer()
@@ -98,14 +134,13 @@ public struct SettingsView: View {
                     }
                 }
             }
-            Spacer()
         }
         .navigationBarTitle(Text("CGM Settings", bundle: frameworkBundle))
         .navigationBarItems(
             trailing: Button(action: {
                 self.viewModel.onClose.send()
             }, label: {
-                Text("Done", bundle: frameworkBundle)
+                Text("Done", bundle: frameworkBundle).fontWeight(.bold)
             })
         ).onAppear {
             viewModel.viewDidAppear()
@@ -128,11 +163,5 @@ public struct SettingsView: View {
                 ]
             )
         }
-    }
-}
-
-struct SettingsView_Previews: PreviewProvider {
-    static var previews: some View {
-        SettingsView(viewModel: SettingsViewModel(nightscoutService: NightscoutAPIService())).environment(\.colorScheme, .dark)
     }
 }

@@ -40,45 +40,60 @@ public class NightscoutRemoteCGM: CGMManager {
     private var isFetching = false
 
     public func fetchNewDataIfNeeded(_ completion: @escaping (CGMReadingResult) -> Void) {
-        guard !isFetching else {
-            delegateQueue.async { completion(.noData) }; return
-        }
+        guard !isFetching else { completion(.noData); return }
+        
         processQueue.async {
             self.isFetching = true
-            self.fetchLibreData { result in
-                self.isFetching = false
-                self.delegateQueue.async { completion(result) }
+            
+            // --- TRAFFIC CONTROLLER ---
+            if self.keychain.getUseDirectLibre() {
+                self.fetchLibreData { result in
+                    self.isFetching = false
+                    self.delegateQueue.async { completion(result) }
+                }
+            } else {
+                self.fetchNightscoutData { result in
+                    self.isFetching = false
+                    self.delegateQueue.async { completion(result) }
+                }
             }
         }
     }
 
-    public var device: HKDevice? = nil
-    public var debugDescription: String { "## NightscoutRemoteCGM\n" }
-    public var appURL: URL? { nightscoutService.url }
-    private let updateTimer: DispatchTimer
-    private func scheduleUpdateTimer() {
-        updateTimer.suspend()
-        updateTimer.eventHandler = { [weak self] in
-            guard let self = self else { return }
-            self.fetchNewDataIfNeeded { result in
-                if case .newData = result { self.delegate.notify { $0?.cgmManager(self, hasNew: result) } }
+    // --- RESTORED NIGHTSCOUT SIDE ---
+    private func fetchNightscoutData(_ completion: @escaping (CGMReadingResult) -> Void) {
+        guard let url = nightscoutService.url else { completion(.noData); return }
+        
+        let fetcher = NightscoutUploader(siteURL: url, apiSecret: nightscoutService.apiSecret)
+        fetcher.fetchGlucose(since: Date().addingTimeInterval(.hours(-24))) { (result) in
+            switch result {
+            case .success(let entries):
+                let samples = entries.compactMap { entry -> NewGlucoseSample? in
+                    guard let quantity = entry.glucoseQuantity else { return nil }
+                    return NewGlucoseSample(date: entry.date, quantity: quantity, condition: nil, trend: nil, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: entry.id)
+                }
+                if let lastEntry = entries.last {
+                    self.latestBackfill = lastEntry
+                }
+                completion(.newData(samples))
+            case .failure:
+                completion(.noData)
             }
         }
-        updateTimer.resume()
     }
 
-    // --- LIBRE INTEGRATION ---
-    private let lEmail = "timothy.theis@gmail.com"
-    private let lPass = "mmg5737TIM%!"
-    
+    // --- DIRECT LIBRE SIDE ---
     private func fetchLibreData(_ completion: @escaping (CGMReadingResult) -> Void) {
+        let email = keychain.getLibreEmail() ?? ""
+        let pass = keychain.getLibrePassword() ?? ""
+        
         let authUrl = URL(string: "https://api-us.libreview.io/llu/auth/login")!
         var authReq = URLRequest(url: authUrl)
         authReq.httpMethod = "POST"
         authReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
         authReq.setValue("4.16.0", forHTTPHeaderField: "version")
         authReq.setValue("llu.ios", forHTTPHeaderField: "product")
-        let body = ["email": lEmail, "password": lPass]
+        let body = ["email": email, "password": pass]
         authReq.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         URLSession.shared.dataTask(with: authReq) { data, _, _ in
@@ -103,8 +118,6 @@ public class NightscoutRemoteCGM: CGMManager {
             connReq.setValue("llu.ios", forHTTPHeaderField: "product")
             connReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
             connReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
-            
-            // Bypass Apple's 5-minute cache to allow 1-minute updates
             connReq.cachePolicy = .reloadIgnoringLocalCacheData
 
             URLSession.shared.dataTask(with: connReq) { d, _, _ in
@@ -155,7 +168,6 @@ public class NightscoutRemoteCGM: CGMManager {
                            let gj = try? JSONSerialization.jsonObject(with: gd) as? [String: Any],
                            let gdDict = gj["data"] as? [String: Any],
                            let graphData = gdDict["graphData"] as? [[String: Any]] {
-                            
                             for gItem in graphData {
                                 if let gValNum = gItem["Value"] as? NSNumber,
                                    let gTs = gItem["FactoryTimestamp"] as? String {
@@ -173,47 +185,56 @@ public class NightscoutRemoteCGM: CGMManager {
                                         default: break
                                         }
                                     }
-                                    samples.append(NewGlucoseSample(
-                                        date: gDate, 
-                                        quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: gValNum.doubleValue), 
-                                        condition: nil, trend: gLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: gID
-                                    ))
+                                    samples.append(NewGlucoseSample(date: gDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: gValNum.doubleValue), condition: nil, trend: gLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: gID))
                                 }
                             }
                         }
-                        
-                        // Add current live point
-                        samples.append(NewGlucoseSample(
-                            date: currentDate, 
-                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), 
-                            condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID
-                        ))
+                        samples.append(NewGlucoseSample(date: currentDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID))
                         samples.sort { $0.date < $1.date }
-                        
-                        self.latestBackfill = GlucoseEntry(
-                            glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID
-                        )
+                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID)
                         completion(.newData(samples))
                     }.resume()
-                    
                 } else {
                     if currentDate > self.latestBackfill!.date {
-                        let sample = NewGlucoseSample(
-                            date: currentDate, 
-                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), 
-                            condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID
-                        )
-                        self.latestBackfill = GlucoseEntry(
-                            glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID
-                        )
+                        let sample = NewGlucoseSample(date: currentDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID)
+                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID)
                         completion(.newData([sample]))
-                    } else {
-                        completion(.noData)
-                    }
+                    } else { completion(.noData) }
                 }
             }.resume()
         }.resume()
     }
+
+    public var device: HKDevice? = nil
+    public var debugDescription: String { "## NightscoutRemoteCGM\n" }
+    private let updateTimer: DispatchTimer
+    private func scheduleUpdateTimer() {
+        updateTimer.suspend()
+        updateTimer.eventHandler = { [weak self] in
+            guard let self = self else { return }
+            self.fetchNewDataIfNeeded { result in
+                if case .newData = result { self.delegate.notify { $0?.cgmManager(self, hasNew: result) } }
+            }
+        }
+        updateTimer.resume()
+    }
+}
+
+// --- KEYCHAIN EXTENSION ---
+extension KeychainManager {
+    private enum LibreKey: String {
+        case useDirect = "com.loopkit.NightscoutRemoteCGM.UseDirectLibre"
+        case email = "com.loopkit.NightscoutRemoteCGM.LibreEmail"
+        case password = "com.loopkit.NightscoutRemoteCGM.LibrePassword"
+    }
+    func setUseDirectLibre(_ useDirect: Bool) { set(useDirect ? "true" : "false", forKey: LibreKey.useDirect.rawValue) }
+    func getUseDirectLibre() -> Bool { return get(LibreKey.useDirect.rawValue) == "true" }
+    func setLibreCredentials(email: String, pass: String) {
+        set(email, forKey: LibreKey.email.rawValue)
+        set(pass, forKey: LibreKey.password.rawValue)
+    }
+    func getLibreEmail() -> String? { return get(LibreKey.email.rawValue) }
+    func getLibrePassword() -> String? { return get(LibreKey.password.rawValue) }
 }
 
 extension NightscoutRemoteCGM {
