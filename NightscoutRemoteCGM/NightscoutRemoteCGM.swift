@@ -64,9 +64,9 @@ public class NightscoutRemoteCGM: CGMManager {
     private func fetchNightscoutData(_ completion: @escaping (CGMReadingResult) -> Void) {
         guard let url = nightscoutService.url else { completion(.noData); return }
         
-        // Fixed: Replaced "NightscoutUploader" with standard "NightscoutClient"
-        let client = NightscoutClient(siteURL: url, apiSecret: nightscoutService.apiSecret)
-        client.fetchGlucose(since: Date().addingTimeInterval(.hours(-24))) { (result) in
+        // Fixed: Swapped to the correct NightscoutFetcher class
+        let fetcher = NightscoutFetcher(siteURL: url, apiSecret: nightscoutService.apiSecret)
+        fetcher.fetchGlucose(since: Date().addingTimeInterval(.hours(-24))) { (result) in
             switch result {
             case .success(let entries):
                 let samples = entries.compactMap { entry -> NewGlucoseSample? in
@@ -222,7 +222,7 @@ public class NightscoutRemoteCGM: CGMManager {
 }
 
 // --- KEYCHAIN EXTENSION ---
-// Fixed: Swapped strict keychain API calls to standard UserDefaults 
+// Fixed: Swapped strict keychain API calls to standard UserDefaults
 extension KeychainManager {
     private enum LibreKey: String {
         case useDirect = "com.loopkit.NightscoutRemoteCGM.UseDirectLibre"
