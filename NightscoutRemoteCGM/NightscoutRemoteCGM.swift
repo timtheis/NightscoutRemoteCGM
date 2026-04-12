@@ -17,7 +17,6 @@ public class NightscoutRemoteCGM: CGMManager {
 
     public init() {
         nightscoutService = NightscoutAPIService(keychainManager: keychain)
-        // 1. TIMING FIX: Set to 60 seconds to match the 1-minute data heartbeat
         updateTimer = DispatchTimer(timeInterval: 60, queue: processQueue)
         scheduleUpdateTimer()
     }
@@ -35,7 +34,7 @@ public class NightscoutRemoteCGM: CGMManager {
     public let providesBLEHeartbeat = false
     public var managedDataInterval: TimeInterval?
     public var shouldSyncToRemoteService = false
-    public var useFilter = true // Keep this enabled
+    public var useFilter = false
     public private(set) var latestBackfill: GlucoseEntry?
     private let processQueue = DispatchQueue(label: "NightscoutRemoteCGM.processQueue")
     private var isFetching = false
@@ -66,33 +65,6 @@ public class NightscoutRemoteCGM: CGMManager {
             }
         }
         updateTimer.resume()
-    }
-
-    // --- LAYER 2: KALMAN FILTER ---
-    private var kalmanEstimate: Double? = nil
-    private var kalmanError: Double = 1.0
-    private let kalmanQ: Double = 0.05 // Process Variance (How fast true BG changes)
-    private let kalmanR: Double = 3.0  // Measurement Variance (How much we trust the sensor)
-
-    private func resetKalman() {
-        kalmanEstimate = nil
-        kalmanError = 1.0
-    }
-
-    private func applyKalman(rawGlucose: Double) -> Double {
-        guard let estimate = kalmanEstimate else {
-            kalmanEstimate = rawGlucose
-            return rawGlucose
-        }
-        let predictedEstimate = estimate
-        let predictedError = kalmanError + kalmanQ
-        
-        let kalmanGain = predictedError / (predictedError + kalmanR)
-        let newEstimate = predictedEstimate + kalmanGain * (rawGlucose - predictedEstimate)
-        kalmanError = (1 - kalmanGain) * predictedError
-        
-        kalmanEstimate = newEstimate
-        return newEstimate
     }
 
     // --- LIBRE INTEGRATION ---
@@ -132,7 +104,7 @@ public class NightscoutRemoteCGM: CGMManager {
             connReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
             connReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
             
-            // 2. CACHE BUSTER: Force iOS to fetch the 1-minute data directly from Abbott
+            // Bypass Apple's 5-minute cache to allow 1-minute updates
             connReq.cachePolicy = .reloadIgnoringLocalCacheData
 
             URLSession.shared.dataTask(with: connReq) { d, _, _ in
@@ -167,7 +139,6 @@ public class NightscoutRemoteCGM: CGMManager {
                     }
                 }
 
-                // SMART BACKFILL LOGIC
                 if self.latestBackfill == nil {
                     let graphUrl = URL(string: "https://api-us.libreview.io/llu/connections/\(patientId)/graph")!
                     var graphReq = URLRequest(url: graphUrl)
@@ -176,11 +147,10 @@ public class NightscoutRemoteCGM: CGMManager {
                     graphReq.setValue("llu.ios", forHTTPHeaderField: "product")
                     graphReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     graphReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
-                    graphReq.cachePolicy = .reloadIgnoringLocalCacheData // Cache buster for history
+                    graphReq.cachePolicy = .reloadIgnoringLocalCacheData
 
                     URLSession.shared.dataTask(with: graphReq) { gd, _, _ in
-                        var rawPoints: [(date: Date, val: Double, trend: LoopKit.GlucoseTrend?, id: String)] = []
-                        
+                        var samples: [NewGlucoseSample] = []
                         if let gd = gd,
                            let gj = try? JSONSerialization.jsonObject(with: gd) as? [String: Any],
                            let gdDict = gj["data"] as? [String: Any],
@@ -203,44 +173,38 @@ public class NightscoutRemoteCGM: CGMManager {
                                         default: break
                                         }
                                     }
-                                    rawPoints.append((date: gDate, val: gValNum.doubleValue, trend: gLoopTrend, id: gID))
+                                    samples.append(NewGlucoseSample(
+                                        date: gDate, 
+                                        quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: gValNum.doubleValue), 
+                                        condition: nil, trend: gLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: gID
+                                    ))
                                 }
                             }
                         }
                         
-                        rawPoints.append((date: currentDate, val: currentVal, trend: currentLoopTrend, id: currentSID))
-                        rawPoints.sort { $0.date < $1.date }
-                        
-                        self.resetKalman()
-                        var samples: [NewGlucoseSample] = []
-                        var finalSmoothedVal: Double = currentVal
-                        
-                        for p in rawPoints {
-                            let smoothedVal = self.applyKalman(rawGlucose: p.val)
-                            finalSmoothedVal = smoothedVal
-                            samples.append(NewGlucoseSample(
-                                date: p.date, 
-                                quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: smoothedVal), 
-                                condition: nil, trend: p.trend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: p.id
-                            ))
-                        }
+                        // Add current live point
+                        samples.append(NewGlucoseSample(
+                            date: currentDate, 
+                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), 
+                            condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID
+                        ))
+                        samples.sort { $0.date < $1.date }
                         
                         self.latestBackfill = GlucoseEntry(
-                            glucose: finalSmoothedVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID
+                            glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID
                         )
                         completion(.newData(samples))
                     }.resume()
                     
                 } else {
                     if currentDate > self.latestBackfill!.date {
-                        let smoothedVal = self.applyKalman(rawGlucose: currentVal)
                         let sample = NewGlucoseSample(
                             date: currentDate, 
-                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: smoothedVal), 
+                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), 
                             condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID
                         )
                         self.latestBackfill = GlucoseEntry(
-                            glucose: smoothedVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID
+                            glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID
                         )
                         completion(.newData([sample]))
                     } else {
