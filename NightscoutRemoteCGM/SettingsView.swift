@@ -19,7 +19,15 @@ final class SettingsViewModel: ObservableObject {
     
     // Libre States via UserDefaults
     @Published var useDirectLibre: Bool {
-        didSet { UserDefaults.standard.set(useDirectLibre ? "true" : "false", forKey: "com.loopkit.NightscoutRemoteCGM.UseDirectLibre") }
+        didSet { 
+            UserDefaults.standard.set(useDirectLibre ? "true" : "false", forKey: "com.loopkit.NightscoutRemoteCGM.UseDirectLibre") 
+            // FIRE THE STATUS CHECK THE MOMENT THE SWITCH IS FLIPPED OFF
+            if !useDirectLibre {
+                updateServiceStatus()
+            } else {
+                serviceStatus = .unknown
+            }
+        }
     }
     @Published var libreEmail: String {
         didSet { UserDefaults.standard.set(libreEmail, forKey: "com.loopkit.NightscoutRemoteCGM.LibreEmail") }
@@ -62,6 +70,11 @@ final class SettingsViewModel: ObservableObject {
     }
     
     private func updateServiceStatus(){
+        // Show "Checking..." immediately before pinging the server
+        DispatchQueue.main.async {
+            self.serviceStatus = .unknown 
+        }
+        
         nightscoutService.checkServiceStatus { result in
             DispatchQueue.main.async {
                 switch result {
@@ -81,7 +94,7 @@ final class SettingsViewModel: ObservableObject {
         
         func localizedString() -> String {
             switch self {
-            case .unknown: return ""
+            case .unknown: return "Checking..." // <-- Added visual feedback!
             case .ok: return "OK"
             case .error(let err): return err.localizedDescription
             }
@@ -120,7 +133,7 @@ public struct SettingsView: View {
                         SecureField("Password", text: $viewModel.librePassword)
                     }
                     
-		    Section(header: Text("Advanced Connection Settings")) {
+                    Section(header: Text("Advanced Connection Settings")) {
                         Picker("Region Code", selection: $viewModel.libreRegion) {
                             Text("US").tag("us")
                             Text("EU").tag("eu")
