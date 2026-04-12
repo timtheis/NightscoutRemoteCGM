@@ -120,10 +120,16 @@ public struct SettingsView: View {
                         SecureField("Password", text: $viewModel.librePassword)
                     }
                     
-                    Section(header: Text("Advanced Connection Settings")) {
-                        TextField("Region Code (e.g., us, eu)", text: $viewModel.libreRegion)
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
+		    Section(header: Text("Advanced Connection Settings")) {
+                        Picker("Region Code", selection: $viewModel.libreRegion) {
+                            Text("US").tag("us")
+                            Text("EU").tag("eu")
+                            Text("CA").tag("ca")
+                            Text("AU").tag("au")
+                            Text("AE").tag("ae")
+                            Text("AP").tag("ap")
+                            Text("JP").tag("jp")
+                        }
                             
                         TextField("App Version (e.g., 4.16.0)", text: $viewModel.libreVersion)
                             .keyboardType(.numbersAndPunctuation)
