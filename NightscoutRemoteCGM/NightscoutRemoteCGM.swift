@@ -264,15 +264,26 @@ public class NightscoutRemoteCGM: CGMManager {
                 let currentDate = fmt.date(from: ts) ?? Date()
                 let currentSID = "LLU" + String(Int(currentDate.timeIntervalSince1970))
                 
-                let currentTrendInt = gData["TrendArrow"] as? Int
+		let currentTrendInt = gData["TrendArrow"] as? Int
                 var currentLoopTrend: LoopKit.GlucoseTrend? = nil
+                var nsTrend: BloodGlucose.Trend? = nil
                 if let t = currentTrendInt {
                     switch t {
-                    case 1: currentLoopTrend = .downDown
-                    case 2: currentLoopTrend = .down
-                    case 3: currentLoopTrend = .flat
-                    case 4: currentLoopTrend = .up
-                    case 5: currentLoopTrend = .upUp
+                    case 1: 
+                        currentLoopTrend = .downDown
+                        nsTrend = .doubleDown
+                    case 2: 
+                        currentLoopTrend = .down
+                        nsTrend = .singleDown
+                    case 3: 
+                        currentLoopTrend = .flat
+                        nsTrend = .flat
+                    case 4: 
+                        currentLoopTrend = .up
+                        nsTrend = .singleUp
+                    case 5: 
+                        currentLoopTrend = .upUp
+                        nsTrend = .doubleUp
                     default: break
                     }
                 }
@@ -316,13 +327,13 @@ public class NightscoutRemoteCGM: CGMManager {
                         }
                         samples.append(NewGlucoseSample(date: currentDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID))
                         samples.sort { $0.date < $1.date }
-                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID)
+                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nsTrend, changeRate: nil, id: currentSID)
                         completion(.newData(samples))
                     }.resume()
                 } else {
                     if currentDate > self.latestBackfill!.date {
                         let sample = NewGlucoseSample(date: currentDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID)
-                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nil, changeRate: nil, id: currentSID)
+                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nsTrend, changeRate: nil, id: currentSID)
                         completion(.newData([sample]))
                     } else { completion(.noData) }
                 }
