@@ -266,24 +266,13 @@ public class NightscoutRemoteCGM: CGMManager {
                 
 		let currentTrendInt = gData["TrendArrow"] as? Int
                 var currentLoopTrend: LoopKit.GlucoseTrend? = nil
-                var nsTrend: BloodGlucose.Trend? = nil
                 if let t = currentTrendInt {
                     switch t {
-                    case 1: 
-                        currentLoopTrend = .downDown
-                        nsTrend = .doubleDown
-                    case 2: 
-                        currentLoopTrend = .down
-                        nsTrend = .singleDown
-                    case 3: 
-                        currentLoopTrend = .flat
-                        nsTrend = .flat
-                    case 4: 
-                        currentLoopTrend = .up
-                        nsTrend = .singleUp
-                    case 5: 
-                        currentLoopTrend = .upUp
-                        nsTrend = .doubleUp
+                    case 1: currentLoopTrend = .downDown
+                    case 2: currentLoopTrend = .down
+                    case 3: currentLoopTrend = .flat
+                    case 4: currentLoopTrend = .up
+                    case 5: currentLoopTrend = .upUp
                     default: break
                     }
                 }
@@ -327,13 +316,13 @@ public class NightscoutRemoteCGM: CGMManager {
                         }
                         samples.append(NewGlucoseSample(date: currentDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID))
                         samples.sort { $0.date < $1.date }
-                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nsTrend, changeRate: nil, id: currentSID)
+                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: self.makeNSTrend(from: currentLoopTrend), changeRate: nil, id: currentSID)
                         completion(.newData(samples))
                     }.resume()
                 } else {
                     if currentDate > self.latestBackfill!.date {
                         let sample = NewGlucoseSample(date: currentDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID)
-                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: nsTrend, changeRate: nil, id: currentSID)
+                        self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: self.makeNSTrend(from: currentLoopTrend), changeRate: nil, id: currentSID)
                         completion(.newData([sample]))
                     } else { completion(.noData) }
                 }
@@ -388,3 +377,8 @@ extension NightscoutRemoteCGM {
     public func getSoundBaseURL() -> URL? { return nil }
     public func getSounds() -> [Alert.Sound] { return [] }
 }
+// Generic helper to dynamically infer and create Nightscout's trend enum without knowing its name
+    private func makeNSTrend<T: RawRepresentable>(from loopTrend: LoopKit.GlucoseTrend?) -> T? where T.RawValue == Int {
+        guard let loopTrend = loopTrend else { return nil }
+        return T(rawValue: loopTrend.rawValue)
+    }
