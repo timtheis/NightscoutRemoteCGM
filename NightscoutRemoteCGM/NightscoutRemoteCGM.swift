@@ -211,12 +211,19 @@ public class NightscoutRemoteCGM: CGMManager {
     private func fetchLibreData(_ completion: @escaping (CGMReadingResult) -> Void) {
         let email = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibreEmail") ?? ""
         let pass = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibrePassword") ?? ""
+        let regionRaw = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibreRegion") ?? "us"
+        let versionRaw = UserDefaults.standard.string(forKey: "com.loopkit.NightscoutRemoteCGM.LibreVersion") ?? "4.16.0"
         
-        let authUrl = URL(string: "https://api-us.libreview.io/llu/auth/login")!
+        let region = regionRaw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let apiVersion = versionRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "4.16.0" : versionRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let domain = region.isEmpty ? "api.libreview.io" : "api-\(region).libreview.io"
+        
+        let authUrl = URL(string: "https://\(domain)/llu/auth/login")!
         var authReq = URLRequest(url: authUrl)
         authReq.httpMethod = "POST"
         authReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        authReq.setValue("4.16.0", forHTTPHeaderField: "version")
+        authReq.setValue(apiVersion, forHTTPHeaderField: "version")
         authReq.setValue("llu.ios", forHTTPHeaderField: "product")
         let body = ["email": email, "password": pass]
         authReq.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -236,10 +243,10 @@ public class NightscoutRemoteCGM: CGMManager {
             let hashedId = SHA256.hash(data: userIdData)
             let accountId = hashedId.compactMap { String(format: "%02x", $0) }.joined()
 
-            let connUrl = URL(string: "https://api-us.libreview.io/llu/connections")!
+            let connUrl = URL(string: "https://\(domain)/llu/connections")!
             var connReq = URLRequest(url: connUrl)
             connReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            connReq.setValue("4.16.0", forHTTPHeaderField: "version")
+            connReq.setValue(apiVersion, forHTTPHeaderField: "version")
             connReq.setValue("llu.ios", forHTTPHeaderField: "product")
             connReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
             connReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
@@ -264,7 +271,7 @@ public class NightscoutRemoteCGM: CGMManager {
                 let currentDate = fmt.date(from: ts) ?? Date()
                 let currentSID = "LLU" + String(Int(currentDate.timeIntervalSince1970))
                 
-		let currentTrendInt = gData["TrendArrow"] as? Int
+                let currentTrendInt = gData["TrendArrow"] as? Int
                 var currentLoopTrend: LoopKit.GlucoseTrend? = nil
                 if let t = currentTrendInt {
                     switch t {
@@ -278,10 +285,10 @@ public class NightscoutRemoteCGM: CGMManager {
                 }
 
                 if self.latestBackfill == nil || currentDate.timeIntervalSince(self.latestBackfill!.date) > 120 {
-                    let graphUrl = URL(string: "https://api-us.libreview.io/llu/connections/\(patientId)/graph")!
+                    let graphUrl = URL(string: "https://\(domain)/llu/connections/\(patientId)/graph")!
                     var graphReq = URLRequest(url: graphUrl)
                     graphReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                    graphReq.setValue("4.16.0", forHTTPHeaderField: "version")
+                    graphReq.setValue(apiVersion, forHTTPHeaderField: "version")
                     graphReq.setValue("llu.ios", forHTTPHeaderField: "product")
                     graphReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     graphReq.setValue(accountId, forHTTPHeaderField: "Account-Id")
@@ -316,12 +323,14 @@ public class NightscoutRemoteCGM: CGMManager {
                         }
                         samples.append(NewGlucoseSample(date: currentDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID))
                         samples.sort { $0.date < $1.date }
+                        
                         self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: self.makeNSTrend(from: currentLoopTrend), changeRate: nil, id: currentSID)
                         completion(.newData(samples))
                     }.resume()
                 } else {
                     if currentDate > self.latestBackfill!.date {
                         let sample = NewGlucoseSample(date: currentDate, quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: currentVal), condition: nil, trend: currentLoopTrend, trendRate: nil, isDisplayOnly: false, wasUserEntered: false, syncIdentifier: currentSID)
+                        
                         self.latestBackfill = GlucoseEntry(glucose: currentVal, date: currentDate, device: "Libre", glucoseType: .sensor, trend: self.makeNSTrend(from: currentLoopTrend), changeRate: nil, id: currentSID)
                         completion(.newData([sample]))
                     } else { completion(.noData) }
@@ -363,6 +372,12 @@ public class NightscoutRemoteCGM: CGMManager {
         }
         updateTimer.resume()
     }
+
+    // Generic helper to dynamically infer and create Nightscout's trend enum without knowing its exact namespace
+    private func makeNSTrend<T: RawRepresentable>(from loopTrend: LoopKit.GlucoseTrend?) -> T? where T.RawValue == Int {
+        guard let loopTrend = loopTrend else { return nil }
+        return T(rawValue: loopTrend.rawValue)
+    }
 }
 
 // MARK: - AlertResponder implementation
@@ -377,8 +392,3 @@ extension NightscoutRemoteCGM {
     public func getSoundBaseURL() -> URL? { return nil }
     public func getSounds() -> [Alert.Sound] { return [] }
 }
-// Generic helper to dynamically infer and create Nightscout's trend enum without knowing its name
-    private func makeNSTrend<T: RawRepresentable>(from loopTrend: LoopKit.GlucoseTrend?) -> T? where T.RawValue == Int {
-        guard let loopTrend = loopTrend else { return nil }
-        return T(rawValue: loopTrend.rawValue)
-    }
